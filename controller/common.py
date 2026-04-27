@@ -118,6 +118,7 @@ def ensure_gitea_user(
                 "source_id": 0,
                 "must_change_password": False,
                 "admin": admin,
+                "password": password,
             },
         )
         resp.raise_for_status()
