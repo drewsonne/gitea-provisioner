@@ -167,9 +167,9 @@ def delete_gitea_user(
 # ---------------------------------------------------------------------------
 
 
-def list_user_tokens(user_client: httpx.Client) -> list[dict[str, Any]]:
-    """List all tokens for the authenticated user."""
-    resp = user_client.get("/user/tokens")
+def list_user_tokens(user_client: httpx.Client, username: str) -> list[dict[str, Any]]:
+    """List all tokens for *username*."""
+    resp = user_client.get(f"/users/{username}/tokens")
     resp.raise_for_status()
     return resp.json()
 
@@ -226,7 +226,7 @@ def ensure_token(
     - Token absent → create it.
     """
     with _user_client(url, username, password) as client:
-        tokens = list_user_tokens(client)
+        tokens = list_user_tokens(client, username)
         token_exists = any(t["name"] == token_name for t in tokens)
 
         if token_exists and existing_token_value:
