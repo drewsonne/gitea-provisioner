@@ -1,0 +1,136 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: giteausers.gitea.drewsonne.github.io
+spec:
+  group: gitea.drewsonne.github.io
+  scope: Namespaced
+  names:
+    plural: giteausers
+    singular: giteauser
+    kind: GiteaUser
+    shortNames:
+      - gu
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Username
+          type: string
+          jsonPath: .spec.username
+        - name: Email
+          type: string
+          jsonPath: .spec.email
+        - name: Repos
+          type: integer
+          jsonPath: .spec.repositories[*]
+        - name: Ready
+          type: boolean
+          jsonPath: .status.create_fn.ready
+        - name: Drift
+          type: boolean
+          jsonPath: .status.check_drift.drift
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: ["spec"]
+          properties:
+            spec:
+              type: object
+              required: ["username", "email"]
+              properties:
+                username:
+                  type: string
+                  description: >
+                    The Gitea username for the bot account.
+                    Must be unique within the Gitea instance.
+                  maxLength: 40
+                  pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,38}[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
+                email:
+                  type: string
+                  description: "Email address for the bot account."
+                  maxLength: 255
+                tokenScopes:
+                  type: array
+                  description: >
+                    Fine-grained scopes for the Gitea API token stored in the
+                    tokenSecretRef. Defaults to ["repository"] if omitted.
+                    See https://docs.gitea.com/api/1.20/#section/Authentication
+                    for the full scope list.
+                  default: ["repository"]
+                  items:
+                    type: string
+                    enum:
+                      - activitypub
+                      - admin
+                      - issue
+                      - misc
+                      - notification
+                      - organization
+                      - package
+                      - repository
+                      - user
+                repositories:
+                  type: array
+                  description: >
+                    Repository collaborations to maintain for this user. The
+                    operator performs a convergent sync — listed repos are added
+                    or updated; repos removed from the list are left alone (no
+                    implicit removal outside of CR deletion).
+                  items:
+                    type: object
+                    required: ["name", "permission"]
+                    properties:
+                      name:
+                        type: string
+                        description: "Repository in 'owner/repo' format."
+                        pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+                        maxLength: 255
+                      permission:
+                        type: string
+                        description: >
+                          Access level to grant. 'read' is read-only;
+                          'write' allows pushing; 'admin' grants full control.
+                        enum:
+                          - read
+                          - write
+                          - admin
+                tokenSecretRef:
+                  type: object
+                  description: >
+                    Where to store the generated Gitea API token. Defaults to a
+                    Secret named '{cr-name}-gitea-token' in the CR's namespace.
+                  properties:
+                    name:
+                      type: string
+                      description: "Name of the Kubernetes Secret."
+                      maxLength: 253
+                    namespace:
+                      type: string
+                      description: >
+                        Namespace for the Secret. Defaults to the CR's namespace.
+                        Cross-namespace Secrets cannot have an owner reference and
+                        will not be auto-deleted when the CR is removed.
+                      maxLength: 63
+                giteaAdminSecret:
+                  type: object
+                  description: >
+                    Override the default Gitea admin credentials supplied via env
+                    vars. Useful when managing users on multiple Gitea instances.
+                  required: ["name", "namespace"]
+                  properties:
+                    name:
+                      type: string
+                      maxLength: 253
+                    namespace:
+                      type: string
+                      maxLength: 63
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true

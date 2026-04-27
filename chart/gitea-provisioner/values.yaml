@@ -1,0 +1,10 @@
+image:
+  repository: drewsonne/gitea-provisioner
+  tag: latest
+
+gitea:
+  url: http://gitea-http.gitea.svc.cluster.local
+  adminSecret:
+    name: gitea-admin-credentials
+
+namespace: gitea

@@ -1,0 +1,253 @@
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+name: Publish Helm Chart
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Image"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout existing gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-existing
+        continue-on-error: true
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Extract version from tag
+        id: vars
+        run: |
+          TAG=$(git describe --tags --exact-match 2>/dev/null || git tag --points-at HEAD | head -n1)
+          VERSION="${TAG#v}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Update chart version and appVersion
+        run: |
+          sed -i "s/^version:.*/version: ${VERSION}/" chart/gitea-provisioner/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" chart/gitea-provisioner/Chart.yaml
+
+      - name: Package chart
+        run: |
+          helm package chart/gitea-provisioner
+
+      - name: Prepare publish directory
+        run: |
+          mkdir -p publish
+
+          # Carry over existing releases from gh-pages
+          if [ -d gh-pages-existing ]; then
+            cp gh-pages-existing/*.tgz publish/ 2>/dev/null || true
+            cp gh-pages-existing/index.yaml publish/ 2>/dev/null || true
+          fi
+
+          # Add the new release
+          cp *.tgz publish/
+
+          # Merge into existing index (--merge keeps old entries)
+          if [ -f publish/index.yaml ]; then
+            helm repo index publish \
+              --url https://drewsonne.github.io/gitea-provisioner \
+              --merge publish/index.yaml
+          else
+            helm repo index publish \
+              --url https://drewsonne.github.io/gitea-provisioner
+          fi
+
+      - name: Generate index.html from README
+        run: |
+          pip install --quiet PyYAML
+
+          python3 - <<'PYEOF'
+          import re, yaml, html, pathlib
+
+          readme = pathlib.Path("README.md").read_text()
+
+          def inline(text: str) -> str:
+              text = re.sub(r"`([^`]+)`", r"<code>\1</code>", html.escape(text))
+              text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+              return text
+
+          def is_table_row(line: str) -> bool:
+              return line.strip().startswith("|") and line.strip().endswith("|")
+
+          def is_separator_row(line: str) -> bool:
+              return bool(re.match(r"^\|[\s\-|]+\|$", line.strip()))
+
+          def parse_cells(line: str) -> list:
+              cells = line.strip().strip("|").split("|")
+              return [c.strip() for c in cells]
+
+          def flush_table(table_lines: list, out: list) -> None:
+              if not table_lines:
+                  return
+              out.append("<table>")
+              header_done = False
+              in_tbody = False
+              for row in table_lines:
+                  if is_separator_row(row):
+                      out.append("  </thead><tbody>")
+                      in_tbody = True
+                      continue
+                  cells = parse_cells(row)
+                  if not header_done and not in_tbody:
+                      out.append("  <thead><tr>")
+                      for c in cells:
+                          out.append(f"    <th>{inline(c)}</th>")
+                      out.append("  </tr>")
+                      header_done = True
+                  else:
+                      out.append("  <tr>")
+                      for c in cells:
+                          out.append(f"    <td>{inline(c)}</td>")
+                      out.append("  </tr>")
+              if in_tbody:
+                  out.append("  </tbody>")
+              out.append("</table>")
+
+          def md_to_html(md: str) -> str:
+              lines = md.split("\n")
+              out = []
+              in_code = False
+              in_list = False
+              table_buf: list = []
+              for line in lines:
+                  if line.startswith("```"):
+                      flush_table(table_buf, out)
+                      table_buf = []
+                      if in_list:
+                          out.append("</ul>")
+                          in_list = False
+                      if in_code:
+                          out.append("</code></pre>")
+                          in_code = False
+                      else:
+                          lang = line[3:].strip()
+                          out.append(f'<pre><code class="language-{lang}">' if lang else "<pre><code>")
+                          in_code = True
+                      continue
+                  if in_code:
+                      out.append(html.escape(line))
+                      continue
+                  if is_table_row(line):
+                      if in_list:
+                          out.append("</ul>")
+                          in_list = False
+                      table_buf.append(line)
+                      continue
+                  else:
+                      flush_table(table_buf, out)
+                      table_buf = []
+                  if line.strip() == "" or line.strip() == "---":
+                      if in_list:
+                          out.append("</ul>")
+                          in_list = False
+                      if line.strip() == "---":
+                          out.append("<hr>")
+                      continue
+                  m = re.match(r"^(#{1,6})\s+(.*)", line)
+                  if m:
+                      if in_list:
+                          out.append("</ul>")
+                          in_list = False
+                      level = len(m.group(1))
+                      out.append(f"<h{level}>{html.escape(m.group(2))}</h{level}>")
+                      continue
+                  m = re.match(r"^\s*[\*\-]\s+(.*)", line)
+                  if m:
+                      if not in_list:
+                          out.append("<ul>")
+                          in_list = True
+                      out.append(f"  <li>{inline(m.group(1))}</li>")
+                      continue
+                  if in_list:
+                      out.append("</ul>")
+                      in_list = False
+                  out.append(f"<p>{inline(line)}</p>")
+              flush_table(table_buf, out)
+              if in_list:
+                  out.append("</ul>")
+              if in_code:
+                  out.append("</code></pre>")
+              return "\n".join(out)
+
+          body_html = md_to_html(readme)
+
+          idx = yaml.safe_load(pathlib.Path("publish/index.yaml").read_text())
+          entries = idx.get("entries", {}).get("gitea-provisioner", [])
+          entries.sort(key=lambda e: e.get("created", ""), reverse=True)
+
+          releases_html = """
+          <h2>Helm Chart Releases</h2>
+          <table>
+            <thead><tr><th>Version</th><th>App Version</th><th>Created</th><th>Download</th></tr></thead>
+            <tbody>
+          """
+          for e in entries:
+              ver = html.escape(str(e.get("version", "")))
+              app_ver = html.escape(str(e.get("appVersion", "")))
+              created = html.escape(str(e.get("created", ""))[:19])
+              url = e.get("urls", [""])[0]
+              fname = url.rsplit("/", 1)[-1] if url else ""
+              releases_html += f'  <tr><td>{ver}</td><td>{app_ver}</td><td>{created}</td>'
+              releases_html += f'<td><a href="{html.escape(fname)}">{html.escape(fname)}</a></td></tr>\n'
+          releases_html += "  </tbody>\n</table>"
+
+          page = f"""<!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>gitea-provisioner</title>
+          <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                   max-width: 800px; margin: 2rem auto; padding: 0 1rem; color: #24292f;
+                   line-height: 1.6; }}
+            pre {{ background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; }}
+            code {{ font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
+            th, td {{ border: 1px solid #d0d7de; padding: 0.5rem 0.75rem; text-align: left; }}
+            th {{ background: #f6f8fa; }}
+            a {{ color: #0969da; }}
+            hr {{ border: none; border-top: 1px solid #d0d7de; margin: 1.5rem 0; }}
+            h1 {{ border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }}
+            h2 {{ border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }}
+          </style>
+          </head>
+          <body>
+          {body_html}
+          <hr>
+          {releases_html}
+          <hr>
+          <p><a href="index.yaml">Helm Repository Index (index.yaml)</a></p>
+          </body>
+          </html>"""
+
+          pathlib.Path("publish/index.html").write_text(page)
+          print(f"Generated index.html with {len(entries)} release(s)")
+          PYEOF
+
+      - name: Publish to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./publish

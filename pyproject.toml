@@ -1,0 +1,63 @@
+[project]
+name = "gitea-provisioner"
+version = "0.0.0"
+description = "Kubernetes operator to provision Gitea users and repository access via CRDs"
+requires-python = ">=3.14"
+dependencies = [
+    "kopf>=1.37,<2",
+    "httpx>=0.27,<1",
+    "kubernetes>=31,<33",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4",
+    "pytest>=8",
+    "pytest-httpx>=0.35",
+    "ruff>=0.11",
+    "ty>=0.0.1a7",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "ANN204",  # missing return type for __init__
+    "COM812",  # trailing comma (formatter handles)
+    "D203",    # one-blank-line-before-class (conflicts with D211)
+    "D213",    # multi-line-summary-second-line (conflicts with D212)
+]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "ANN",      # no annotations required in tests
+    "D",        # no docstrings required in tests
+    "INP001",   # tests/ is not a package
+    "S101",     # assert is fine in pytest
+    "PLR2004",  # magic values fine in test assertions
+    "SLF001",   # accessing private helpers is fine in tests
+]
+
+"controller/**/*.py" = [
+    "ANN401",   # kopf passes Any for body/spec/status
+    "ARG001",   # kopf handlers have required unused params
+    "D103",     # kopf handlers don't need docstrings
+    "EM102",    # f-string in TemporaryError is fine for kopf
+    "INP001",   # controller/ is not a package
+    "PLC0415",  # imports inside handlers to avoid circular deps
+    "PLR0913",  # kopf handlers have many params by design
+    "PLR2004",  # magic values in status code checks
+    "TRY003",   # long messages in TemporaryError are fine for kopf
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty.rules]
+# kopf decorators use introspection; their type stubs don't match handler signatures
+invalid-argument-type = "ignore"
