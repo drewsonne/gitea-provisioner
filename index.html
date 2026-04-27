@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gitea-provisioner</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 800px; margin: 2rem auto; padding: 0 1rem; color: #24292f;
+         line-height: 1.6; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9em; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #d0d7de; padding: 0.5rem 0.75rem; text-align: left; }
+  th { background: #f6f8fa; }
+  a { color: #0969da; }
+  hr { border: none; border-top: 1px solid #d0d7de; margin: 1.5rem 0; }
+  h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
+  h2 { border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
+</style>
+</head>
+<body>
+<h1>gitea-provisioner</h1>
+<p>A lightweight Kubernetes operator that provisions Gitea bot users, API tokens, SSH keys, repository access, and Actions secrets declaratively via CRDs.</p>
+<p>Applications and automation pipelines can request their own Gitea credentials without manual Gitea admin access or pre-deploy scripts.</p>
+<hr>
+<h2>What it does</h2>
+<p>The operator manages one CRD kind:</p>
+<table>
+  <thead><tr>
+    <th>Kind</th>
+    <th>What it provisions</th>
+  </tr>
+  </thead><tbody>
+  <tr>
+    <td><code>GiteaUser</code></td>
+    <td>A Gitea user with an API token, SSH keys, repository collaborations, and Actions secrets</td>
+  </tr>
+  </tbody>
+</table>
+<p>All resources are reconciled continuously — the operator detects and repairs out-of-band drift every 5 minutes.</p>
+<hr>
+<h2>Installation</h2>
+<p>Add the Helm repository:</p>
+<pre><code class="language-bash">
+helm repo add gitea-provisioner https://drewsonne.github.io/gitea-provisioner
+helm repo update
+</code></pre>
+<p>Install the chart:</p>
+<pre><code class="language-bash">
+helm install gitea-provisioner gitea-provisioner/gitea-provisioner \
+  --namespace gitea \
+  --set gitea.url=http://gitea-http.gitea.svc.cluster.local \
+  --set gitea.adminSecret.name=gitea-admin-credentials
+</code></pre>
+<hr>
+<h2>Requirements</h2>
+<ul>
+  <li>A running Gitea instance accessible from within the cluster</li>
+  <li>A Kubernetes Secret containing Gitea admin credentials:</li>
+</ul>
+<pre><code class="language-yaml">
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitea-admin-credentials
+  namespace: gitea
+stringData:
+  username: admin
+  password: &lt;admin-password&gt;
+</code></pre>
+<hr>
+<h2>Configuration</h2>
+<p>Default values:</p>
+<pre><code class="language-yaml">
+image:
+  repository: drewsonne/gitea-provisioner
+  tag: latest
+
+gitea:
+  url: http://gitea-http.gitea.svc.cluster.local
+  adminSecret:
+    name: gitea-admin-credentials
+
+namespace: gitea
+</code></pre>
+<hr>
+<h2>Usage</h2>
+<h3>GiteaUser</h3>
+<p>Creates a Gitea user with a managed API token stored in a Kubernetes Secret.</p>
+<pre><code class="language-yaml">
+apiVersion: gitea.drewsonne.github.io/v1
+kind: GiteaUser
+metadata:
+  name: gizmo
+  namespace: gitea
+spec:
+  username: gizmo
+  email: gizmo@example.com
+</code></pre>
+<h4>Token scopes</h4>
+<p>Control what the generated API token can access. Defaults to <code>[&quot;repository&quot;]</code>.</p>
+<pre><code class="language-yaml">
+spec:
+  tokenScopes:
+    - repository
+    - issue
+    - user
+    - organization
+</code></pre>
+<p>Available scopes: <code>activitypub</code>, <code>admin</code>, <code>issue</code>, <code>misc</code>, <code>notification</code>, <code>organization</code>, <code>package</code>, <code>repository</code>, <code>user</code>.</p>
+<h4>Repository access</h4>
+<p>Grant the user collaborator access to specific repositories with a permission level.</p>
+<pre><code class="language-yaml">
+spec:
+  repositories:
+    - name: myorg/my-repo
+      permission: write   # read | write | admin
+    - name: myorg/other-repo
+      permission: read
+</code></pre>
+<h4>SSH keys</h4>
+<p>Register SSH public keys on the account. Keys are identified by their <code>name</code> (title in Gitea). The operator adds missing keys, replaces keys whose content has changed, and removes keys whose name is dropped from the list. Keys added outside this spec are never touched.</p>
+<p><strong>Inline public key:</strong></p>
+<pre><code class="language-yaml">
+spec:
+  sshKeys:
+    - name: my-laptop
+      publicKey: &quot;ssh-ed25519 AAAA... user@host&quot;
+</code></pre>
+<p><strong>From a Kubernetes Secret</strong> (compatible with the [1Password operator](https://developer.1password.com/docs/k8s/k8s-operator/)):</p>
+<pre><code class="language-yaml">
+# The 1Password operator syncs the key into a Secret
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: drew-ssh-key
+  namespace: gitea
+spec:
+  itemPath: &quot;vaults/Home Lab/items/gitea-drew-ssh-key&quot;
+---
+apiVersion: gitea.drewsonne.github.io/v1
+kind: GiteaUser
+metadata:
+  name: drew
+  namespace: gitea
+spec:
+  username: drew
+  email: drew@example.com
+  sshKeys:
+    - name: home-lab
+      secretRef:
+        name: drew-ssh-key   # Secret created by OnePasswordItem above
+        namespace: gitea
+        key: &quot;public key&quot;    # field name within the 1Password item / Secret
+</code></pre>
+<h4>Actions secrets</h4>
+<p>Set user-level Gitea Actions secrets sourced from Kubernetes Secrets. Secret values are always re-applied on reconcile (Gitea never returns values so drift can only be detected by name). Secrets removed from the list are deleted from Gitea.</p>
+<pre><code class="language-yaml">
+spec:
+  actionsSecrets:
+    - name: OP_SERVICE_ACCOUNT_TOKEN
+      secretRef:
+        name: op-service-account
+        namespace: gitea
+        key: token
+    - name: REGISTRY_TOKEN
+      secretRef:
+        name: registry-credentials
+        key: token           # namespace defaults to the CR&#x27;s namespace
+</code></pre>
+<p><code>secretRef</code> fields:</p>
+<table>
+  <thead><tr>
+    <th>Field</th>
+    <th>Required</th>
+    <th>Description</th>
+  </tr>
+  </thead><tbody>
+  <tr>
+    <td><code>name</code></td>
+    <td>yes</td>
+    <td>Name of the Kubernetes Secret</td>
+  </tr>
+  <tr>
+    <td><code>key</code></td>
+    <td>yes</td>
+    <td>Key within the Secret whose value is used</td>
+  </tr>
+  <tr>
+    <td><code>namespace</code></td>
+    <td>no</td>
+    <td>Namespace of the Secret; defaults to the CR&#x27;s namespace</td>
+  </tr>
+  </tbody>
+</table>
+<h4>Admin privileges</h4>
+<pre><code class="language-yaml">
+spec:
+  admin: true   # default: false
+</code></pre>
+<h4>Custom token secret location</h4>
+<p>By default the token Secret is created as <code>{cr-name}-gitea-token</code> in the CR&#x27;s namespace. Override with:</p>
+<pre><code class="language-yaml">
+spec:
+  tokenSecretRef:
+    name: my-bot-token
+    namespace: other-namespace   # cross-namespace; no owner reference applied
+</code></pre>
+<h4>Full example</h4>
+<pre><code class="language-yaml">
+apiVersion: gitea.drewsonne.github.io/v1
+kind: GiteaUser
+metadata:
+  name: gizmo
+  namespace: gitea
+spec:
+  username: gizmo
+  email: gizmo@sonne.zone
+  admin: false
+  tokenScopes:
+    - repository
+    - issue
+    - user
+    - organization
+  repositories:
+    - name: myorg/openclaw
+      permission: write
+    - name: myorg/docs
+      permission: read
+  sshKeys:
+    - name: deploy-key
+      secretRef:
+        name: gizmo-ssh-key
+        key: &quot;public key&quot;
+  actionsSecrets:
+    - name: OP_SERVICE_ACCOUNT_TOKEN
+      secretRef:
+        name: op-credentials
+        key: token
+  tokenSecretRef:
+    name: openclaw-gitea-token
+    namespace: gitea
+</code></pre>
+<hr>
+<h2>Per-CR credential override</h2>
+<p>Every CR accepts an optional <code>giteaAdminSecret</code> field to use credentials from a different Gitea instance (useful for multi-tenant setups):</p>
+<pre><code class="language-yaml">
+spec:
+  giteaAdminSecret:
+    name: my-other-gitea-admin
+    namespace: gitea
+</code></pre>
+<p>The referenced Secret may contain <code>username</code>, <code>password</code>, and optionally <code>url</code> (overrides the <code>GITEA_URL</code> env var).</p>
+<hr>
+<h2>Output</h2>
+<p><code>GiteaUser</code> creates a Secret containing:</p>
+<table>
+  <thead><tr>
+    <th>Key</th>
+    <th>Description</th>
+  </tr>
+  </thead><tbody>
+  <tr>
+    <td><code>token</code></td>
+    <td>The Gitea API token</td>
+  </tr>
+  <tr>
+    <td><code>username</code></td>
+    <td>The Gitea username</td>
+  </tr>
+  <tr>
+    <td><code>password</code></td>
+    <td>The user&#x27;s Gitea password (for basic-auth clients)</td>
+  </tr>
+  <tr>
+    <td><code>url</code></td>
+    <td>The Gitea instance URL</td>
+  </tr>
+  </tbody>
+</table>
+<pre><code class="language-bash">
+kubectl get secret gizmo-gitea-token -n gitea -o yaml
+</code></pre>
+<hr>
+<h2>Behaviour notes</h2>
+<ul>
+  <li><strong>Idempotent</strong> — safe to reapply; existing Gitea resources are updated, not recreated</li>
+  <li><strong>Credential preservation</strong> — on resume or update, the existing password and token are reused from the Secret; the token is only regenerated if the Secret is missing or the token no longer exists in Gitea</li>
+  <li><strong>SSH key tracking</strong> — keys are tracked by their <code>name</code> (title); only keys whose title appears in the spec are ever modified or removed</li>
+  <li><strong>Actions secrets</strong> — values are always re-applied (Gitea does not return secret values); names dropped from the spec are deleted from Gitea</li>
+  <li><strong>Drift detection</strong> — a timer runs every 5 minutes per resource to detect and repair out-of-band changes (e.g. manual edits in the Gitea UI); drift is visible in <code>kubectl describe</code> as a K8s Warning event and in the <code>Drift</code> printer column</li>
+  <li><strong>Repository removals</strong> — collaborations added by the operator are only removed on CR deletion; repos removed from the spec mid-lifecycle are left in place until the CR is deleted</li>
+</ul>
+<hr>
+<h2>Observability</h2>
+<pre><code class="language-bash">
+kubectl get giteausers
+</code></pre>
+<p>Printer columns include <code>Username</code>, <code>Email</code>, <code>Admin</code>, <code>Ready</code>, <code>Drift</code>, and <code>Age</code>.</p>
+<p>Drift events are also emitted as Kubernetes Warning events visible via <code>kubectl describe giteauser &lt;name&gt;</code>.</p>
+<hr>
+<h2>Development</h2>
+<p>Build locally:</p>
+<pre><code class="language-bash">
+docker build -t drewsonne/gitea-provisioner:dev .
+</code></pre>
+<p>Run locally (requires cluster access):</p>
+<pre><code class="language-bash">
+docker run --rm \
+  -e GITEA_URL=http://gitea-http.gitea.svc.cluster.local \
+  -e GITEA_ADMIN_USERNAME=admin \
+  -e GITEA_ADMIN_PASSWORD=... \
+  drewsonne/gitea-provisioner:dev
+</code></pre>
+<hr>
+<h2>License</h2>
+<p>GPLv3</p>
+<hr>
+
+<h2>Helm Chart Releases</h2>
+<table>
+  <thead><tr><th>Version</th><th>App Version</th><th>Created</th><th>Download</th></tr></thead>
+  <tbody>
+  <tr><td>0.0.4</td><td>0.0.4</td><td>2026-04-27T19:36:51</td><td><a href="gitea-provisioner-0.0.4.tgz">gitea-provisioner-0.0.4.tgz</a></td></tr>
+  </tbody>
+</table>
+<hr>
+<p><a href="index.yaml">Helm Repository Index (index.yaml)</a></p>
+</body>
+</html>

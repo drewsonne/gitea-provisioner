@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  gitea-provisioner:
+  - apiVersion: v2
+    appVersion: 0.0.4
+    created: "2026-04-27T19:36:51.952061839Z"
+    description: Provision Gitea bot users and repository access via CRDs
+    digest: 05f074cfe733dcb7e0ab7b155aa4b381629022049b877b2c9931d804e9b7ae69
+    name: gitea-provisioner
+    type: application
+    urls:
+    - https://drewsonne.github.io/gitea-provisioner/gitea-provisioner-0.0.4.tgz
+    version: 0.0.4
+generated: "2026-04-27T19:36:51.951721849Z"
