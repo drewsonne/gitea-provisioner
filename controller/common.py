@@ -44,10 +44,10 @@ def _admin_client(url: str, username: str, password: str) -> httpx.Client:
 
 
 def _user_client(url: str, username: str, password: str) -> httpx.Client:
-    """Return an httpx Client pre-configured with a specific user's basic-auth.
+    """Return an httpx Client authenticated as *username*.
 
-    Gitea's token-management endpoints require basic auth as the target user,
-    not a bearer token — even when the caller is an admin.
+    Gitea's token and SSH-key endpoints require basic auth as the target user,
+    not an admin bearer token — even when the caller is a Gitea admin.
     """
     return httpx.Client(
         base_url=f"{url.rstrip('/')}/api/v1",
@@ -57,6 +57,33 @@ def _user_client(url: str, username: str, password: str) -> httpx.Client:
         },
         timeout=15.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Kubernetes Secret reference resolution
+# ---------------------------------------------------------------------------
+
+
+def resolve_secret_ref(ref: dict[str, str], cr_namespace: str) -> str:
+    """Read a single value from a Kubernetes Secret reference.
+
+    *ref* must contain ``name`` and ``key``; ``namespace`` is optional and
+    defaults to *cr_namespace*.
+    """
+    ns = ref.get("namespace", cr_namespace)
+    secret_name = ref["name"]
+    key = ref["key"]
+    data = get_existing_secret_data(ns, secret_name)
+    if data is None:
+        raise kopf.TemporaryError(
+            f"Secret {ns}/{secret_name} referenced in secretRef not found.",
+            delay=30,
+        )
+    if key not in data:
+        raise kopf.PermanentError(
+            f"Key {key!r} not found in secret {ns}/{secret_name}."
+        )
+    return data[key].strip()
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +105,7 @@ def ensure_gitea_user(
     username: str,
     email: str,
     password: str,
+    admin: bool,
     logger: kopf.Logger,
 ) -> None:
     """Create or update a Gitea user via the admin API."""
@@ -89,10 +117,11 @@ def ensure_gitea_user(
                 "login_name": username,
                 "source_id": 0,
                 "must_change_password": False,
+                "admin": admin,
             },
         )
         resp.raise_for_status()
-        logger.info("Updated Gitea user %r", username)
+        logger.info("Updated Gitea user %r (admin=%s)", username, admin)
     else:
         resp = client.post(
             "/admin/users",
@@ -109,6 +138,13 @@ def ensure_gitea_user(
         )
         resp.raise_for_status()
         logger.info("Created Gitea user %r", username)
+        # CreateUserOption has no admin field — set it separately.
+        if admin:
+            client.patch(
+                f"/admin/users/{username}",
+                json={"login_name": username, "source_id": 0, "admin": True},
+            ).raise_for_status()
+            logger.info("Granted admin privileges to %r", username)
 
 
 def delete_gitea_user(
@@ -126,7 +162,7 @@ def delete_gitea_user(
 
 
 # ---------------------------------------------------------------------------
-# Gitea token management (user API — requires user's own credentials)
+# Gitea token management (requires user's own credentials)
 # ---------------------------------------------------------------------------
 
 
@@ -184,11 +220,9 @@ def ensure_token(
 ) -> str:
     """Ensure the managed token exists and return its value.
 
-    - If the token exists in Gitea AND we have the value in the secret:
-      no-op; return the stored value.
-    - If the token exists in Gitea but we lost the value (secret gone):
-      delete and recreate to obtain a fresh value.
-    - If the token does not exist: create it.
+    - Token exists in Gitea AND secret has the value → no-op; return stored value.
+    - Token exists but secret is gone → delete and recreate to get a fresh value.
+    - Token absent → create it.
     """
     with _user_client(url, username, password) as client:
         tokens = list_user_tokens(client)
@@ -203,7 +237,6 @@ def ensure_token(
             return existing_token_value
 
         if token_exists:
-            # Value was lost (secret deleted externally) — regenerate.
             logger.warning(
                 "Token %r exists in Gitea for %r but secret is missing — regenerating",
                 token_name,
@@ -212,6 +245,200 @@ def ensure_token(
             delete_user_token(client, username, token_name, logger)
 
         return create_user_token(client, username, token_name, scopes, logger)
+
+
+# ---------------------------------------------------------------------------
+# Gitea SSH key management (list via admin; add/delete via user credentials)
+# ---------------------------------------------------------------------------
+
+
+def resolve_ssh_public_key(entry: dict[str, Any], cr_namespace: str) -> str:
+    """Return the SSH public key string from an sshKeys spec entry.
+
+    Accepts either ``publicKey`` (inline string) or ``secretRef`` (reference to
+    a Kubernetes Secret containing the public key).
+    """
+    if "publicKey" in entry:
+        return str(entry["publicKey"]).strip()
+    if "secretRef" in entry:
+        return resolve_secret_ref(entry["secretRef"], cr_namespace)
+    raise kopf.PermanentError(
+        f"SSH key entry {entry.get('name')!r} must specify either "
+        "'publicKey' or 'secretRef'."
+    )
+
+
+def _list_user_ssh_keys(
+    admin_client: httpx.Client, username: str
+) -> list[dict[str, Any]]:
+    """List SSH public keys for *username* using admin credentials."""
+    resp = admin_client.get(f"/users/{username}/keys")
+    resp.raise_for_status()
+    return resp.json()
+
+
+def sync_ssh_keys(
+    admin_client: httpx.Client,
+    url: str,
+    username: str,
+    user_password: str,
+    desired_entries: list[dict[str, Any]],
+    removed_titles: set[str],
+    cr_namespace: str,
+    logger: kopf.Logger,
+) -> None:
+    """Reconcile SSH keys for *username* to match *desired_entries*.
+
+    - Adds keys whose title is absent.
+    - Replaces keys whose title matches but content differs (delete + re-add).
+    - Deletes keys named in *removed_titles* (titles explicitly removed from spec).
+    - Never touches keys with titles outside the desired+removed sets (leaves
+      manually-added keys untouched).
+    """
+    current_keys = _list_user_ssh_keys(admin_client, username)
+    current_by_title: dict[str, dict[str, Any]] = {k["title"]: k for k in current_keys}
+
+    with _user_client(url, username, user_password) as uclient:
+        # Ensure desired keys exist with correct content.
+        for entry in desired_entries:
+            title: str = entry["name"]
+            public_key = resolve_ssh_public_key(entry, cr_namespace)
+            existing = current_by_title.get(title)
+
+            if existing is None:
+                uclient.post(
+                    "/user/keys",
+                    json={"key": public_key, "read_only": False, "title": title},
+                ).raise_for_status()
+                logger.info("Added SSH key %r for user %r", title, username)
+            elif existing["key"].strip() != public_key:
+                # Content changed — replace.
+                uclient.delete(f"/user/keys/{existing['id']}").raise_for_status()
+                uclient.post(
+                    "/user/keys",
+                    json={"key": public_key, "read_only": False, "title": title},
+                ).raise_for_status()
+                logger.info(
+                    "Replaced SSH key %r for user %r (content changed)", title, username
+                )
+            else:
+                logger.debug("SSH key %r for %r already up-to-date", title, username)
+
+        # Remove keys that were explicitly dropped from spec.
+        for title in removed_titles:
+            existing = current_by_title.get(title)
+            if existing is not None:
+                resp = uclient.delete(f"/user/keys/{existing['id']}")
+                if resp.status_code != 404:
+                    resp.raise_for_status()
+                logger.info(
+                    "Removed SSH key %r from %r (dropped from spec)", title, username
+                )
+
+
+def remove_all_ssh_keys(
+    url: str,
+    username: str,
+    user_password: str,
+    titles: list[str],
+    logger: kopf.Logger,
+) -> None:
+    """Delete all SSH keys matching *titles* for *username*. Called on CR delete."""
+    with _user_client(url, username, user_password) as uclient:
+        # List via the user client since admin endpoint needs different path
+        resp = uclient.get("/user/keys")
+        resp.raise_for_status()
+        current_keys: list[dict[str, Any]] = resp.json()
+        titles_set = set(titles)
+        for key in current_keys:
+            if key["title"] in titles_set:
+                dr = uclient.delete(f"/user/keys/{key['id']}")
+                if dr.status_code != 404:
+                    dr.raise_for_status()
+                logger.info(
+                    "Removed SSH key %r from %r (CR deleted)", key["title"], username
+                )
+
+
+# ---------------------------------------------------------------------------
+# Gitea Actions secrets management (requires user credentials)
+# ---------------------------------------------------------------------------
+
+
+def list_actions_secret_names(url: str, username: str, user_password: str) -> set[str]:
+    """Return the set of Actions secret names currently set for *username*.
+
+    Secret values are never returned by Gitea — only the names are available.
+    """
+    with _user_client(url, username, user_password) as client:
+        resp = client.get("/user/actions/secrets")
+        if resp.status_code == 404:
+            # Older Gitea versions may not support user-level Actions secrets.
+            return set()
+        resp.raise_for_status()
+        return {s["name"] for s in resp.json()}
+
+
+def sync_actions_secrets(
+    url: str,
+    username: str,
+    user_password: str,
+    desired_entries: list[dict[str, Any]],
+    removed_names: set[str],
+    cr_namespace: str,
+    logger: kopf.Logger,
+) -> None:
+    """Reconcile Actions secrets for *username*.
+
+    Sets all desired secrets (PUT is idempotent — creates or updates). Deletes
+    secrets named in *removed_names* (explicitly dropped from spec).
+    Gitea never returns secret values so we always re-PUT to stay converged.
+    """
+    with _user_client(url, username, user_password) as client:
+        for entry in desired_entries:
+            secret_name: str = entry["name"]
+            value = resolve_secret_ref(entry["secretRef"], cr_namespace)
+            resp = client.put(
+                f"/user/actions/secrets/{secret_name}",
+                json={"data": value},
+            )
+            if resp.status_code == 404:
+                logger.warning(
+                    "Actions secrets endpoint not available for %r — "
+                    "Gitea version may be too old",
+                    username,
+                )
+                return
+            resp.raise_for_status()
+            logger.info("Set Actions secret %r for user %r", secret_name, username)
+
+        for secret_name in removed_names:
+            resp = client.delete(f"/user/actions/secrets/{secret_name}")
+            if resp.status_code not in {200, 204, 404}:
+                resp.raise_for_status()
+            logger.info(
+                "Deleted Actions secret %r from %r (dropped from spec)",
+                secret_name,
+                username,
+            )
+
+
+def remove_all_actions_secrets(
+    url: str,
+    username: str,
+    user_password: str,
+    names: list[str],
+    logger: kopf.Logger,
+) -> None:
+    """Delete all listed Actions secrets for *username*. Called on CR delete."""
+    with _user_client(url, username, user_password) as client:
+        for secret_name in names:
+            resp = client.delete(f"/user/actions/secrets/{secret_name}")
+            if resp.status_code not in {200, 204, 404}:
+                resp.raise_for_status()
+            logger.info(
+                "Deleted Actions secret %r from %r (CR deleted)", secret_name, username
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +478,8 @@ def sync_collaborators(
 ) -> None:
     """Reconcile repository collaborations to match *repositories* spec.
 
-    Adds missing collaborations, updates wrong permissions, and removes any
-    collaborations not listed in the spec.
+    Adds missing collaborations and updates wrong permissions. Stale
+    collaborations are only removed on CR deletion via remove_all_collaborations.
     """
     desired: dict[str, str] = {}
     for entry in repositories:
@@ -261,7 +488,6 @@ def sync_collaborators(
         owner, repo = _parse_repo(repo_name)
         desired[f"{owner}/{repo}"] = permission
 
-    # Add / update desired collaborations
     for repo_name, permission in desired.items():
         owner, repo = _parse_repo(repo_name)
         current = _get_collaborator_permission(client, owner, repo, username)
@@ -292,16 +518,6 @@ def sync_collaborators(
             repo_name,
             permission,
         )
-
-    # Removals of stale collaborations happen only in remove_all_collaborations
-    # (called on CR delete). Iterating all repos a user has access to is
-    # expensive and not needed for the normal convergence loop.
-
-    # To find stale collaborations we'd need to iterate all repos the user
-    # has access to, which is expensive. Instead we remove collaborations only
-    # from repos that were previously managed (tracked via spec diff by kopf).
-    # For an explicit cleanup, callers should pass an empty repositories list
-    # before deleting the CR, or rely on GiteaUser delete handler.
 
 
 def remove_all_collaborations(

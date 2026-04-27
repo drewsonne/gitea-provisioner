@@ -48,6 +48,7 @@ unfixable = []
     "ARG001",   # kopf handlers have required unused params
     "D103",     # kopf handlers don't need docstrings
     "EM102",    # f-string in TemporaryError is fine for kopf
+    "FBT001",   # boolean positional args are fine in internal Gitea API helpers
     "INP001",   # controller/ is not a package
     "PLC0415",  # imports inside handlers to avoid circular deps
     "PLR0913",  # kopf handlers have many params by design

@@ -24,9 +24,9 @@ spec:
         - name: Email
           type: string
           jsonPath: .spec.email
-        - name: Repos
-          type: integer
-          jsonPath: .spec.repositories[*]
+        - name: Admin
+          type: boolean
+          jsonPath: .spec.admin
         - name: Ready
           type: boolean
           jsonPath: .status.create_fn.ready
@@ -48,21 +48,25 @@ spec:
                 username:
                   type: string
                   description: >
-                    The Gitea username for the bot account.
+                    The Gitea username for the account.
                     Must be unique within the Gitea instance.
                   maxLength: 40
                   pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,38}[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
                 email:
                   type: string
-                  description: "Email address for the bot account."
+                  description: "Email address for the account."
                   maxLength: 255
+                admin:
+                  type: boolean
+                  default: false
+                  description: >
+                    Whether the account should have Gitea admin privileges.
+                    Defaults to false.
                 tokenScopes:
                   type: array
                   description: >
                     Fine-grained scopes for the Gitea API token stored in the
                     tokenSecretRef. Defaults to ["repository"] if omitted.
-                    See https://docs.gitea.com/api/1.20/#section/Authentication
-                    for the full scope list.
                   default: ["repository"]
                   items:
                     type: string
@@ -80,9 +84,8 @@ spec:
                   type: array
                   description: >
                     Repository collaborations to maintain for this user. The
-                    operator performs a convergent sync — listed repos are added
-                    or updated; repos removed from the list are left alone (no
-                    implicit removal outside of CR deletion).
+                    operator adds or updates listed repos; removals only happen
+                    on CR deletion.
                   items:
                     type: object
                     required: ["name", "permission"]
@@ -95,12 +98,102 @@ spec:
                       permission:
                         type: string
                         description: >
-                          Access level to grant. 'read' is read-only;
-                          'write' allows pushing; 'admin' grants full control.
+                          Access level: 'read' is read-only, 'write' allows
+                          pushing, 'admin' grants full control.
                         enum:
                           - read
                           - write
                           - admin
+                sshKeys:
+                  type: array
+                  description: >
+                    SSH public keys to register on the Gitea account. The
+                    operator adds missing keys, replaces keys whose content has
+                    changed, and removes keys whose title is dropped from the
+                    list. Keys added outside the spec are never touched.
+                  items:
+                    type: object
+                    required: ["name"]
+                    properties:
+                      name:
+                        type: string
+                        description: >
+                          Display title for the key in Gitea. Used to identify
+                          managed keys — must be unique within this spec.
+                        maxLength: 255
+                      publicKey:
+                        type: string
+                        description: >
+                          Inline SSH public key string (e.g. 'ssh-ed25519 AAAA...').
+                          Mutually exclusive with secretRef.
+                      secretRef:
+                        type: object
+                        description: >
+                          Reference to a Kubernetes Secret containing the SSH
+                          public key. Mutually exclusive with publicKey.
+                          Compatible with the 1Password operator: point at the
+                          Secret created by a OnePasswordItem and specify which
+                          field holds the public key.
+                        required: ["name", "key"]
+                        properties:
+                          name:
+                            type: string
+                            description: "Name of the Kubernetes Secret."
+                            maxLength: 253
+                          namespace:
+                            type: string
+                            description: >
+                              Namespace of the Secret. Defaults to the CR's
+                              namespace if omitted.
+                            maxLength: 63
+                          key:
+                            type: string
+                            description: >
+                              The data key within the Secret whose value is the
+                              SSH public key string.
+                            maxLength: 253
+                actionsSecrets:
+                  type: array
+                  description: >
+                    Gitea Actions secrets to set at the user level. Secret
+                    values are read from Kubernetes Secrets via secretRef.
+                    Gitea never returns secret values so the operator re-applies
+                    them on every reconcile to stay converged. Secrets removed
+                    from this list are deleted from Gitea.
+                  items:
+                    type: object
+                    required: ["name", "secretRef"]
+                    properties:
+                      name:
+                        type: string
+                        description: >
+                          Name of the Actions secret as it appears in Gitea
+                          workflow files (e.g. secrets.MY_SECRET).
+                        maxLength: 255
+                        pattern: "^[A-Z][A-Z0-9_]*$"
+                      secretRef:
+                        type: object
+                        description: >
+                          Reference to a Kubernetes Secret containing the secret
+                          value. Compatible with the 1Password operator.
+                        required: ["name", "key"]
+                        properties:
+                          name:
+                            type: string
+                            description: "Name of the Kubernetes Secret."
+                            maxLength: 253
+                          namespace:
+                            type: string
+                            description: >
+                              Namespace of the Secret. Defaults to the CR's
+                              namespace if omitted.
+                            maxLength: 63
+                          key:
+                            type: string
+                            description: >
+                              The data key within the Secret whose value is the
+                              Actions secret value.
+                            maxLength: 253
                 tokenSecretRef:
                   type: object
                   description: >
