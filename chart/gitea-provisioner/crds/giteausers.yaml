@@ -29,7 +29,7 @@ spec:
           jsonPath: .spec.admin
         - name: Ready
           type: boolean
-          jsonPath: .status.create_fn.ready
+          jsonPath: .status.ready
         - name: Drift
           type: boolean
           jsonPath: .status.check_drift.drift
@@ -67,19 +67,28 @@ spec:
                   description: >
                     Fine-grained scopes for the Gitea API token stored in the
                     tokenSecretRef. Defaults to ["repository"] if omitted.
-                  default: ["repository"]
+                  default: ["read:repository"]
                   items:
                     type: string
                     enum:
-                      - activitypub
-                      - admin
-                      - issue
-                      - misc
-                      - notification
-                      - organization
-                      - package
-                      - repository
-                      - user
+                      - read:activitypub
+                      - write:activitypub
+                      - read:admin
+                      - write:admin
+                      - read:issue
+                      - write:issue
+                      - read:misc
+                      - write:misc
+                      - read:notification
+                      - write:notification
+                      - read:organization
+                      - write:organization
+                      - read:package
+                      - write:package
+                      - read:repository
+                      - write:repository
+                      - read:user
+                      - write:user
                 repositories:
                   type: array
                   description: >

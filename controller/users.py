@@ -62,6 +62,7 @@ def _upsert_user(
     name: str,
     namespace: str,
     logger: kopf.Logger,
+    patch: kopf.Patch,
     *,
     removed_ssh_titles: set[str] | None = None,
     removed_actions_names: set[str] | None = None,
@@ -168,6 +169,9 @@ def _upsert_user(
         logger,
     )
 
+    # Write a consistent top-level ready flag regardless of which handler ran.
+    patch.status["ready"] = True
+
     return {
         "ready": True,
         "username": username,
@@ -190,9 +194,10 @@ def create_fn(
     name: str,
     namespace: str,
     logger: kopf.Logger,
+    patch: kopf.Patch,
     **_: Any,
 ) -> dict[str, Any]:
-    return _upsert_user(spec, body, name, namespace, logger)
+    return _upsert_user(spec, body, name, namespace, logger, patch)
 
 
 @kopf.on.resume(CRD_GROUP, CRD_VERSION, "giteausers")
@@ -202,9 +207,10 @@ def resume_fn(
     name: str,
     namespace: str,
     logger: kopf.Logger,
+    patch: kopf.Patch,
     **_: Any,
 ) -> dict[str, Any]:
-    return _upsert_user(spec, body, name, namespace, logger)
+    return _upsert_user(spec, body, name, namespace, logger, patch)
 
 
 @kopf.on.update(
@@ -217,6 +223,7 @@ def update_fn(
     name: str,
     namespace: str,
     logger: kopf.Logger,
+    patch: kopf.Patch,
     **_: Any,
 ) -> dict[str, Any]:
     old_spec = old.get("spec", {}) if old else {}
@@ -236,6 +243,7 @@ def update_fn(
         name,
         namespace,
         logger,
+        patch,
         removed_ssh_titles=removed_ssh,
         removed_actions_names=removed_actions,
     )
@@ -347,6 +355,7 @@ def check_drift(
     name: str,
     namespace: str,
     logger: kopf.Logger,
+    patch: kopf.Patch,
     **_: Any,
 ) -> dict[str, Any] | None:
     gitea_url, admin_user, admin_pass = resolve_connection_params(spec)
@@ -396,7 +405,7 @@ def check_drift(
             username,
             drift_reason,
         )
-        result = _upsert_user(spec, body, name, namespace, logger)
+        result = _upsert_user(spec, body, name, namespace, logger, patch)
         return {**result, "drift": True, "driftReason": drift_reason}
 
     return None
