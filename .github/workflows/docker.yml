@@ -10,10 +10,14 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    permissions:
-      actions: write
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
@@ -24,9 +28,6 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,11 +42,40 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
-          tags: |
-            drewsonne/gitea-provisioner:latest
-            drewsonne/gitea-provisioner:${{ steps.meta.outputs.version }}
+          tags: drewsonne/gitea-provisioner:${{ steps.meta.outputs.version }}-${{ matrix.arch }}
+
+  merge:
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Extract version from tag
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            --tag drewsonne/gitea-provisioner:latest \
+            --tag drewsonne/gitea-provisioner:${{ steps.meta.outputs.version }} \
+            drewsonne/gitea-provisioner:${{ steps.meta.outputs.version }}-amd64 \
+            drewsonne/gitea-provisioner:${{ steps.meta.outputs.version }}-arm64
 
       - name: Trigger Helm publish
         run: |
