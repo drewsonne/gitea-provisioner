@@ -79,6 +79,6 @@ jobs:
 
       - name: Trigger Helm publish
         run: |
-          gh workflow run helm.yml --ref "${{ github.ref }}"
+          gh workflow run helm.yml --repo "${{ github.repository }}" --ref "${{ github.ref }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
