@@ -2,8 +2,18 @@ apiVersion: v1
 entries:
   gitea-provisioner:
   - apiVersion: v2
+    appVersion: 0.0.9
+    created: "2026-05-07T18:43:19.464861457Z"
+    description: Provision Gitea bot users and repository access via CRDs
+    digest: 3fd7d2ff40b23c4d09f76e010d17ea4277f76758d04caec62a08f28da127f9c5
+    name: gitea-provisioner
+    type: application
+    urls:
+    - https://drewsonne.github.io/gitea-provisioner/gitea-provisioner-0.0.9.tgz
+    version: 0.0.9
+  - apiVersion: v2
     appVersion: 0.0.7
-    created: "2026-04-27T23:47:12.761644536Z"
+    created: "2026-05-07T18:43:19.464700527Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: e5cb5bf7dc77837cf8457f5b3bfc542e04107561920211cebaa4644a093815cc
     name: gitea-provisioner
@@ -13,7 +23,7 @@ entries:
     version: 0.0.7
   - apiVersion: v2
     appVersion: 0.0.6
-    created: "2026-04-27T23:47:12.761290395Z"
+    created: "2026-05-07T18:43:19.464369955Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: a4b24f01903ab7f16c002e9d6f9ec14081fe88b77611aaf216174a3c0e90d5b2
     name: gitea-provisioner
@@ -23,7 +33,7 @@ entries:
     version: 0.0.6
   - apiVersion: v2
     appVersion: 0.0.5
-    created: "2026-04-27T23:47:12.76109498Z"
+    created: "2026-05-07T18:43:19.46406379Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: 04db7431c8555aa9221c12ce78fdfc8769c46d8d7a3c83064874dc79139992a7
     name: gitea-provisioner
@@ -33,7 +43,7 @@ entries:
     version: 0.0.5
   - apiVersion: v2
     appVersion: 0.0.4
-    created: "2026-04-27T23:47:12.760873507Z"
+    created: "2026-05-07T18:43:19.463613069Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: 05f074cfe733dcb7e0ab7b155aa4b381629022049b877b2c9931d804e9b7ae69
     name: gitea-provisioner
@@ -41,4 +51,4 @@ entries:
     urls:
     - https://drewsonne.github.io/gitea-provisioner/gitea-provisioner-0.0.4.tgz
     version: 0.0.4
-generated: "2026-04-27T23:47:12.760520548Z"
+generated: "2026-05-07T18:43:19.463325391Z"
