@@ -2,6 +2,14 @@ image:
   repository: drewsonne/gitea-provisioner
   tag: latest
 
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi
+
 gitea:
   url: http://gitea-http.gitea.svc.cluster.local
   adminSecret:
