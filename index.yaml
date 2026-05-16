@@ -3,9 +3,9 @@ entries:
   gitea-provisioner:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-05-16T11:18:36.097450717Z"
+    created: "2026-05-16T11:18:41.019066601Z"
     description: Provision Gitea bot users and repository access via CRDs
-    digest: 744627f9f93821e3e766af5ef3da43dbf592f186660b8e79fad463c0415df521
+    digest: 306d60e1188ea3a73388f262cf01de734ab0ad80309955fba126525846ee75b8
     name: gitea-provisioner
     type: application
     urls:
@@ -13,7 +13,7 @@ entries:
     version: 0.1.0
   - apiVersion: v2
     appVersion: 0.0.9
-    created: "2026-05-16T11:18:36.097260059Z"
+    created: "2026-05-16T11:18:41.018813921Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: 3fd7d2ff40b23c4d09f76e010d17ea4277f76758d04caec62a08f28da127f9c5
     name: gitea-provisioner
@@ -23,7 +23,7 @@ entries:
     version: 0.0.9
   - apiVersion: v2
     appVersion: 0.0.7
-    created: "2026-05-16T11:18:36.097080141Z"
+    created: "2026-05-16T11:18:41.018559748Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: e5cb5bf7dc77837cf8457f5b3bfc542e04107561920211cebaa4644a093815cc
     name: gitea-provisioner
@@ -33,7 +33,7 @@ entries:
     version: 0.0.7
   - apiVersion: v2
     appVersion: 0.0.6
-    created: "2026-05-16T11:18:36.096838608Z"
+    created: "2026-05-16T11:18:41.018355578Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: a4b24f01903ab7f16c002e9d6f9ec14081fe88b77611aaf216174a3c0e90d5b2
     name: gitea-provisioner
@@ -43,7 +43,7 @@ entries:
     version: 0.0.6
   - apiVersion: v2
     appVersion: 0.0.5
-    created: "2026-05-16T11:18:36.09662174Z"
+    created: "2026-05-16T11:18:41.018157059Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: 04db7431c8555aa9221c12ce78fdfc8769c46d8d7a3c83064874dc79139992a7
     name: gitea-provisioner
@@ -53,7 +53,7 @@ entries:
     version: 0.0.5
   - apiVersion: v2
     appVersion: 0.0.4
-    created: "2026-05-16T11:18:36.096404081Z"
+    created: "2026-05-16T11:18:41.017933594Z"
     description: Provision Gitea bot users and repository access via CRDs
     digest: 05f074cfe733dcb7e0ab7b155aa4b381629022049b877b2c9931d804e9b7ae69
     name: gitea-provisioner
@@ -61,4 +61,4 @@ entries:
     urls:
     - https://drewsonne.github.io/gitea-provisioner/gitea-provisioner-0.0.4.tgz
     version: 0.0.4
-generated: "2026-05-16T11:18:36.096084771Z"
+generated: "2026-05-16T11:18:41.017557915Z"
