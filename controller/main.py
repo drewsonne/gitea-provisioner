@@ -10,6 +10,11 @@ from typing import Any
 
 import kopf
 import users  # noqa: F401 — registers GiteaUser handlers
+from logs import configure_logging
+
+# kopf's CLI has already added its own root handler before importing this
+# module; replace it so kopf's own lines are JSON too.
+configure_logging()
 
 
 @kopf.on.startup()

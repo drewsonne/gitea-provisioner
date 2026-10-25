@@ -62,3 +62,6 @@ testpaths = ["tests"]
 [tool.ty.rules]
 # kopf decorators use introspection; their type stubs don't match handler signatures
 invalid-argument-type = "ignore"
+
+[tool.ty.environment]
+extra-paths = ["controller"]
